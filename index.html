@@ -180,6 +180,7 @@ const keys=new Set();
 const clock=new THREE.Clock();
 const camTarget=new THREE.Vector3();
 
+const WORLD_Y=7;
 let characterTemplate=null, localPlayer=null;
 const remotePlayers=new Map();
 let orbitYaw=0,orbitPitch=.32,orbitDist=8.5,dragging=false,lastX=0,lastY=0,lastSend=0;
@@ -208,7 +209,7 @@ async function loadAssets(){
 function makeCharacter(){const c=characterTemplate.clone(true);c.position.set(0,0,0);return c}
 function createLocal(){
   if(!characterTemplate||localPlayer)return;
-  localPlayer={mesh:makeCharacter(),pos:new THREE.Vector3(0,0,8),yaw:Math.PI,speed:4};
+  localPlayer={mesh:makeCharacter(),pos:new THREE.Vector3(0,WORLD_Y,8),yaw:Math.PI,speed:4};
   localPlayer.mesh.position.copy(localPlayer.pos);
   scene.add(localPlayer.mesh);
   window.vhGetLocalState=()=>({x:localPlayer.pos.x,z:localPlayer.pos.z,yaw:localPlayer.yaw});
@@ -216,7 +217,7 @@ function createLocal(){
 function spawnRemote(){
   if(remotePlayers.has('other')||!characterTemplate)return;
   const mesh=makeCharacter();
-  mesh.position.set(2,0,8);
+  mesh.position.set(2,WORLD_Y,8);
   scene.add(mesh);
   remotePlayers.set('other',{mesh,targetPos:mesh.position.clone(),targetYaw:Math.PI});
 }
@@ -260,7 +261,7 @@ function updateCamera(dt){
 window.addEventListener('vh:connected',()=>{createLocal();if(window.vhNetwork.getConnection())window.vhNetwork.getConnection().send({type:'hello',x:localPlayer.pos.x,z:localPlayer.pos.z,yaw:localPlayer.yaw})});
 window.addEventListener('vh:remote',e=>{
   const d=e.detail||{};spawnRemote();
-  const r=remotePlayers.get('other');if(r){r.targetPos.set(d.x,0,d.z);r.targetYaw=d.yaw}
+  const r=remotePlayers.get('other');if(r){r.targetPos.set(d.x,WORLD_Y,d.z);r.targetYaw=d.yaw}
   playersEl.textContent='2 / 2';
 });
 window.addEventListener('vh:disconnected',()=>{removeRemote();playersEl.textContent='1 / 2'});
