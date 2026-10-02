@@ -180,10 +180,10 @@ const keys=new Set();
 const clock=new THREE.Clock();
 const camTarget=new THREE.Vector3();
 
-const WORLD_Y=7;
+const SPAWN_X=-30, SPAWN_Z=-39, WORLD_Y=4;
 let characterTemplate=null, localPlayer=null;
 const remotePlayers=new Map();
-let orbitYaw=0,orbitPitch=.32,orbitDist=8.5,dragging=false,lastX=0,lastY=0,lastSend=0;
+let orbitYaw=0.25,orbitPitch=.24,orbitDist=6.5,dragging=false,lastX=0,lastY=0,lastSend=0;
 
 async function loadAssets(){
   try{
@@ -209,7 +209,7 @@ async function loadAssets(){
 function makeCharacter(){const c=characterTemplate.clone(true);c.position.set(0,0,0);return c}
 function createLocal(){
   if(!characterTemplate||localPlayer)return;
-  localPlayer={mesh:makeCharacter(),pos:new THREE.Vector3(0,WORLD_Y,8),yaw:Math.PI,speed:4};
+  localPlayer={mesh:makeCharacter(),pos:new THREE.Vector3(SPAWN_X,WORLD_Y,SPAWN_Z),yaw:Math.PI,speed:4};
   localPlayer.mesh.position.copy(localPlayer.pos);
   scene.add(localPlayer.mesh);
   window.vhGetLocalState=()=>({x:localPlayer.pos.x,z:localPlayer.pos.z,yaw:localPlayer.yaw});
@@ -217,7 +217,7 @@ function createLocal(){
 function spawnRemote(){
   if(remotePlayers.has('other')||!characterTemplate)return;
   const mesh=makeCharacter();
-  mesh.position.set(2,WORLD_Y,8);
+  mesh.position.set(SPAWN_X+3,WORLD_Y,SPAWN_Z+1);
   scene.add(mesh);
   remotePlayers.set('other',{mesh,targetPos:mesh.position.clone(),targetYaw:Math.PI});
 }
