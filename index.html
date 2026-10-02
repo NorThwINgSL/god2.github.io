@@ -5,6 +5,12 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Verdant Haven — 2 Player</title>
 <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script type="importmap">
+{"imports":{
+  "three":"https://cdn.jsdelivr.net/npm/three@0.179.1/build/three.module.js",
+  "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.179.1/examples/jsm/"
+}}
+</script>
 <style>
 html,body{margin:0;height:100%;overflow:hidden;background:#07110d;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#eef7ef}
 canvas{display:block;width:100%;height:100%}
@@ -13,13 +19,13 @@ canvas{display:block;width:100%;height:100%}
 .pill{background:rgba(8,15,12,.68);backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,.12);padding:8px 11px;border-radius:999px;font-size:13px}
 #room{letter-spacing:.12em;font-weight:800}
 #help{position:absolute;left:14px;bottom:14px;background:rgba(8,15,12,.58);backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,.1);padding:9px 11px;border-radius:12px;font-size:13px;opacity:.88}
-#menu{position:absolute;inset:0;display:grid;place-items:center;background:linear-gradient(rgba(2,8,5,.42),rgba(2,8,5,.76));pointer-events:auto}
+#menu{position:absolute;inset:0;display:grid;place-items:center;background:linear-gradient(rgba(2,8,5,.42),rgba(2,8,5,.76));pointer-events:auto;z-index:10}
 .card{width:min(420px,calc(100vw - 32px));background:rgba(10,20,15,.88);border:1px solid rgba(255,255,255,.12);border-radius:18px;padding:22px;box-shadow:0 20px 70px rgba(0,0,0,.45)}
 h1{margin:0 0 6px;font-size:28px}p{margin:0 0 16px;color:#c6d4c9;line-height:1.45}
 button,input{box-sizing:border-box;width:100%;border-radius:12px;border:1px solid rgba(255,255,255,.12);font:inherit}
-button{padding:12px;background:#eaf4ec;color:#08100b;font-weight:800;cursor:pointer;margin-top:10px}
+button{padding:12px;background:#eaf4ec;color:#08100b;font-weight:800;cursor:pointer;margin-top:10px;position:relative;z-index:20;pointer-events:auto}
 button:disabled{opacity:.55;cursor:wait}
-input{padding:12px;background:#09130e;color:#fff;outline:none;margin-top:4px;text-transform:uppercase;letter-spacing:.15em}
+input{padding:12px;background:#09130e;color:#fff;outline:none;margin-top:4px;text-transform:uppercase;letter-spacing:.15em;position:relative;z-index:20;pointer-events:auto}
 #status{margin-top:13px;font-size:13px;color:#b9c9bc;min-height:18px}
 #crosshair{position:absolute;left:50%;top:50%;width:4px;height:4px;transform:translate(-50%,-50%);border:1px solid rgba(255,255,255,.35);border-radius:50%}
 .hidden{display:none!important}
@@ -36,9 +42,10 @@ input{padding:12px;background:#09130e;color:#fff;outline:none;margin-top:4px;tex
 <button id="join" type="button">Join room</button>
 <div id="status">Loading game…</div>
 </div></div>
+
 <script type="module">
-import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.179.1/build/three.module.js';
-import {GLTFLoader} from 'https://cdn.jsdelivr.net/npm/three@0.179.1/examples/jsm/loaders/GLTFLoader.js';
+import * as THREE from 'three';
+import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 
 const $=id=>document.getElementById(id),menu=$('menu'),statusEl=$('status'),roomEl=$('room'),playersEl=$('players'),createBtn=$('create'),joinBtn=$('join'),roomInput=$('roomInput');
 
@@ -64,7 +71,7 @@ sun.shadow.mapSize.set(2048,2048);
 scene.add(sun);
 
 const loader=new GLTFLoader(),keys=new Set(),clock=new THREE.Clock(),camTarget=new THREE.Vector3();
-let characterTemplate=null,localPlayer=null,peer=null,conn=null,isHost=false;
+let characterTemplate=null,localPlayer=null,peer=null,conn=null;
 const remotePlayers=new Map();
 let orbitYaw=0,orbitPitch=.32,orbitDist=8.5,dragging=false,lastX=0,lastY=0,lastSend=0;
 
@@ -81,7 +88,6 @@ async function loadAssets(){
   environment.position.y-=box.min.y;
   environment.traverse(o=>{if(o.isMesh)o.frustumCulled=true});
   scene.add(environment);
-
   characterTemplate=char.scene;
   characterTemplate.traverse(o=>{if(o.isMesh){o.castShadow=true;o.frustumCulled=true}});
 }
@@ -92,13 +98,13 @@ function makeCharacter(){
   return c;
 }
 function createLocal(){
-  if(!characterTemplate || localPlayer) return;
+  if(!characterTemplate||localPlayer)return;
   localPlayer={mesh:makeCharacter(),pos:new THREE.Vector3(0,0,8),yaw:Math.PI,speed:4};
   localPlayer.mesh.position.copy(localPlayer.pos);
   scene.add(localPlayer.mesh);
 }
 function spawnRemote(){
-  if(remotePlayers.has('other')) return;
+  if(remotePlayers.has('other'))return;
   const mesh=makeCharacter();
   mesh.position.set(2,0,8);
   scene.add(mesh);
@@ -111,48 +117,29 @@ function removeRemote(){
   playersEl.textContent='1 / 2';
 }
 
-renderer.domElement.addEventListener('pointerdown',e=>{
-  dragging=true;lastX=e.clientX;lastY=e.clientY;
-  renderer.domElement.setPointerCapture?.(e.pointerId);
-});
+renderer.domElement.addEventListener('pointerdown',e=>{dragging=true;lastX=e.clientX;lastY=e.clientY;renderer.domElement.setPointerCapture?.(e.pointerId)});
 renderer.domElement.addEventListener('pointerup',()=>dragging=false);
-renderer.domElement.addEventListener('pointermove',e=>{
-  if(!dragging)return;
-  orbitYaw-=(e.clientX-lastX)*.006;
-  orbitPitch-=(e.clientY-lastY)*.004;
-  orbitPitch=Math.max(-.05,Math.min(.95,orbitPitch));
-  lastX=e.clientX;lastY=e.clientY;
-});
-renderer.domElement.addEventListener('wheel',e=>{
-  orbitDist=Math.max(4,Math.min(14,orbitDist+e.deltaY*.01));
-},{passive:true});
-
+renderer.domElement.addEventListener('pointermove',e=>{if(!dragging)return;orbitYaw-=(e.clientX-lastX)*.006;orbitPitch-=(e.clientY-lastY)*.004;orbitPitch=Math.max(-.05,Math.min(.95,orbitPitch));lastX=e.clientX;lastY=e.clientY});
+renderer.domElement.addEventListener('wheel',e=>{orbitDist=Math.max(4,Math.min(14,orbitDist+e.deltaY*.01))},{passive:true});
 addEventListener('keydown',e=>keys.add(e.key.toLowerCase()));
 addEventListener('keyup',e=>keys.delete(e.key.toLowerCase()));
 
 function updateMovement(dt){
   if(!localPlayer)return;
-  let x=0,z=0;
-  if(keys.has('w'))z--;if(keys.has('s'))z++;
-  if(keys.has('a'))x--;if(keys.has('d'))x++;
-  const len=Math.hypot(x,z);
-  if(!len)return;
-  x/=len;z/=len;
-  const c=Math.cos(orbitYaw),s=Math.sin(orbitYaw);
-  const dx=x*c-z*s,dz=x*s+z*c;
+  let x=0,z=0;if(keys.has('w'))z--;if(keys.has('s'))z++;if(keys.has('a'))x--;if(keys.has('d'))x++;
+  const len=Math.hypot(x,z);if(!len)return;
+  x/=len;z/=len;const c=Math.cos(orbitYaw),s=Math.sin(orbitYaw),dx=x*c-z*s,dz=x*s+z*c;
   localPlayer.pos.x=THREE.MathUtils.clamp(localPlayer.pos.x+dx*localPlayer.speed*dt,-52,30);
   localPlayer.pos.z=THREE.MathUtils.clamp(localPlayer.pos.z+dz*localPlayer.speed*dt,-46,48);
   localPlayer.yaw=Math.atan2(dx,dz);
   localPlayer.mesh.position.copy(localPlayer.pos);
   localPlayer.mesh.rotation.y=localPlayer.yaw;
 }
-
 function sendState(now){
   if(!conn||!conn.open||!localPlayer||now-lastSend<50)return;
   lastSend=now;
-  conn.send({type:'state',x:localPlayer.pos.x,z:localPlayer.pos.z,yaw:localPlayer.yaw});
+  try{conn.send({type:'state',x:localPlayer.pos.x,z:localPlayer.pos.z,yaw:localPlayer.yaw})}catch{}
 }
-
 function wireConn(c){
   conn=c;
   conn.on('open',()=>{
@@ -169,24 +156,16 @@ function wireConn(c){
       if(r){r.targetPos.set(d.x,0,d.z);r.targetYaw=d.yaw}
     }
   });
-  conn.on('close',()=>{removeRemote();setStatus('Other player disconnected.');});
-  conn.on('error',e=>{setBusy(false);setStatus('Connection error: '+(e?.message||'try again'));});
+  conn.on('close',()=>{removeRemote();setStatus('Other player disconnected.')});
+  conn.on('error',e=>{setBusy(false);setStatus('Connection error: '+(e?.message||'try again'))});
 }
-
-function randomCode(){
-  const chars='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  let s='';
-  for(let i=0;i<6;i++)s+=chars[Math.floor(Math.random()*chars.length)];
-  return s;
-}
+function randomCode(){const chars='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';let s='';for(let i=0;i<6;i++)s+=chars[Math.floor(Math.random()*chars.length)];return s}
 
 createBtn.addEventListener('click',()=>{
-  if(!window.Peer){setStatus('Multiplayer service failed to load. Refresh once and try again.');return;}
-  if(peer && !peer.destroyed)return;
+  if(!window.Peer){setStatus('Multiplayer service failed to load. Refresh once and try again.');return}
+  if(peer&&!peer.destroyed)return;
   const code=randomCode();
-  isHost=true;
-  setBusy(true);
-  setStatus('Creating room…');
+  setBusy(true);setStatus('Creating room…');
   peer=new window.Peer('vh-'+code.toLowerCase(),{host:'0.peerjs.com',port:443,path:'/',secure:true});
   peer.on('open',()=>{
     roomEl.textContent='ROOM '+code;
@@ -194,38 +173,19 @@ createBtn.addEventListener('click',()=>{
     menu.classList.add('hidden');
     if(!localPlayer)createLocal();
   });
-  peer.on('connection',c=>{
-    if(conn&&conn.open){c.close();return}
-    wireConn(c);
-  });
-  peer.on('disconnected',()=>setStatus('Disconnected from multiplayer server.'));
-  peer.on('error',e=>{
-    setBusy(false);
-    setStatus('Room error: '+(e?.message||'try a different code'));
-    try{peer.destroy()}catch{}
-  });
+  peer.on('connection',c=>{if(conn&&conn.open){c.close();return}wireConn(c)});
+  peer.on('error',e=>{setBusy(false);setStatus('Room error: '+(e?.message||'try a different code'));try{peer.destroy()}catch{}});
 });
-
 joinBtn.addEventListener('click',()=>{
-  if(!window.Peer){setStatus('Multiplayer service failed to load. Refresh once and try again.');return;}
+  if(!window.Peer){setStatus('Multiplayer service failed to load. Refresh once and try again.');return}
   const code=roomInput.value.trim().toUpperCase();
-  if(!code){setStatus('Enter the 6-character room code.');return;}
-  setBusy(true);
-  setStatus('Joining '+code+'…');
-  isHost=false;
+  if(!code){setStatus('Enter the 6-character room code.');return}
+  setBusy(true);setStatus('Joining '+code+'…');
   peer=new window.Peer(undefined,{host:'0.peerjs.com',port:443,path:'/',secure:true});
   peer.on('open',()=>wireConn(peer.connect('vh-'+code.toLowerCase(),{reliable:true})));
-  peer.on('error',e=>{
-    setBusy(false);
-    setStatus('Join error: '+(e?.message||'check the room code'));
-    try{peer.destroy()}catch{}
-  });
+  peer.on('error',e=>{setBusy(false);setStatus('Join error: '+(e?.message||'check the room code'));try{peer.destroy()}catch{}});
 });
-
-addEventListener('beforeunload',()=>{
-  try{conn?.send({type:'bye'})}catch{}
-  try{peer?.destroy()}catch{}
-});
+addEventListener('beforeunload',()=>{try{conn?.send({type:'bye'})}catch{}try{peer?.destroy()}catch{}});
 
 function updateCamera(dt){
   if(!localPlayer)return;
@@ -235,34 +195,19 @@ function updateCamera(dt){
   camera.position.y=camTarget.y+1.8+Math.sin(orbitPitch)*orbitDist;
   camera.lookAt(camTarget.x,camTarget.y+1.25,camTarget.z);
 }
-
 function animate(){
   requestAnimationFrame(animate);
   const dt=Math.min(clock.getDelta(),.05),now=performance.now();
   if(localPlayer){updateMovement(dt);updateCamera(dt);sendState(now)}
-  for(const r of remotePlayers.values()){
-    r.mesh.position.lerp(r.targetPos,Math.min(1,dt*12));
-    r.mesh.rotation.y=THREE.MathUtils.lerp(r.mesh.rotation.y,r.targetYaw,Math.min(1,dt*12));
-  }
+  for(const r of remotePlayers.values()){r.mesh.position.lerp(r.targetPos,Math.min(1,dt*12));r.mesh.rotation.y=THREE.MathUtils.lerp(r.mesh.rotation.y,r.targetYaw,Math.min(1,dt*12))}
   renderer.render(scene,camera);
 }
-
-addEventListener('resize',()=>{
-  camera.aspect=innerWidth/innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(innerWidth,innerHeight);
-});
+addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
 
 (async()=>{
-  try{
-    await loadAssets();
-    setStatus('Ready. Create or join a room.');
-  }catch(e){
-    console.error(e);
-    setStatus('3D assets failed to load: '+e.message);
-  }
+  try{await loadAssets();setStatus('Ready. Create or join a room.')}
+  catch(e){console.error(e);setStatus('3D assets failed to load: '+e.message)}
 })();
-
 animate();
 </script>
 </body>
