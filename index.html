@@ -23,9 +23,9 @@ canvas{display:block;width:100%;height:100%}
 .card{width:min(420px,calc(100vw - 32px));background:rgba(10,20,15,.88);border:1px solid rgba(255,255,255,.12);border-radius:18px;padding:22px;box-shadow:0 20px 70px rgba(0,0,0,.45)}
 h1{margin:0 0 6px;font-size:28px}p{margin:0 0 16px;color:#c6d4c9;line-height:1.45}
 button,input{box-sizing:border-box;width:100%;border-radius:12px;border:1px solid rgba(255,255,255,.12);font:inherit}
-button{padding:12px;background:#eaf4ec;color:#08100b;font-weight:800;cursor:pointer;margin-top:10px;position:relative;z-index:20;pointer-events:auto}
+button{padding:12px;background:#eaf4ec;color:#08100b;font-weight:800;cursor:pointer;margin-top:10px;position:relative;z-index:30;pointer-events:auto}
 button:disabled{opacity:.55;cursor:wait}
-input{padding:12px;background:#09130e;color:#fff;outline:none;margin-top:4px;text-transform:uppercase;letter-spacing:.15em;position:relative;z-index:20;pointer-events:auto}
+input{padding:12px;background:#09130e;color:#fff;outline:none;margin-top:4px;text-transform:uppercase;letter-spacing:.15em;position:relative;z-index:30;pointer-events:auto}
 #status{margin-top:13px;font-size:13px;color:#b9c9bc;min-height:18px}
 #crosshair{position:absolute;left:50%;top:50%;width:4px;height:4px;transform:translate(-50%,-50%);border:1px solid rgba(255,255,255,.35);border-radius:50%}
 .hidden{display:none!important}
@@ -40,15 +40,120 @@ input{padding:12px;background:#09130e;color:#fff;outline:none;margin-top:4px;tex
 <div style="margin-top:14px;color:#9db1a1;font-size:12px">JOIN AN EXISTING ROOM</div>
 <input id="roomInput" maxlength="6" placeholder="ROOM CODE" autocomplete="off">
 <button id="join" type="button">Join room</button>
-<div id="status">Loading game…</div>
+<div id="status">Starting multiplayer…</div>
 </div></div>
+
+<script>
+(function(){
+  const menu=document.getElementById('menu');
+  const status=document.getElementById('status');
+  const room=document.getElementById('room');
+  const players=document.getElementById('players');
+  const create=document.getElementById('create');
+  const join=document.getElementById('join');
+  const roomInput=document.getElementById('roomInput');
+  let peer=null, conn=null, isHost=false;
+  let code='';
+  const remote={pos:{x:0,z:0},yaw:0,connected:false};
+
+  function say(t){status.textContent=t}
+  function busy(v){create.disabled=v;join.disabled=v}
+  function makeCode(){
+    const chars='ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; let s='';
+    for(let i=0;i<6;i++)s+=chars[Math.floor(Math.random()*chars.length)];
+    return s;
+  }
+  function updatePlayers(n){players.textContent=n+' / 2'}
+
+  function wireConnection(c){
+    conn=c;
+    c.on('open',()=>{
+      busy(false);
+      updatePlayers(2);
+      say('Connected. Roam together.');
+      menu.classList.add('hidden');
+      window.dispatchEvent(new CustomEvent('vh:connected'));
+    });
+    c.on('data',d=>{
+      if(!d)return;
+      if(d.type==='state'){
+        remote.pos.x=d.x;remote.pos.z=d.z;remote.yaw=d.yaw;
+        window.dispatchEvent(new CustomEvent('vh:remote',{detail:d}));
+      } else if(d.type==='hello'){
+        window.dispatchEvent(new CustomEvent('vh:remote',{detail:d}));
+        if(window.vhGetLocalState){c.send({type:'state',...window.vhGetLocalState()})}
+      }
+    });
+    c.on('close',()=>{
+      updatePlayers(1); say('Other player disconnected.');
+      window.dispatchEvent(new CustomEvent('vh:disconnected'));
+    });
+    c.on('error',e=>{
+      busy(false); say('Connection error: '+(e&&e.message?e.message:'try again'));
+    });
+  }
+
+  function createRoom(){
+    if(!window.Peer){say('Multiplayer service did not load. Refresh once.');return}
+    if(peer&&!peer.destroyed){return}
+    busy(true);isHost=true;code=makeCode();say('Creating room…');
+    const id='vh-'+code.toLowerCase();
+    try{
+      peer=new window.Peer(id);
+      peer.on('open',()=>{
+        room.textContent='ROOM '+code;
+        say('Room ready. Share code '+code);
+        busy(false);
+        window.vhRoomCode=code;
+        window.dispatchEvent(new CustomEvent('vh:hostready',{detail:{code}}));
+      });
+      peer.on('connection',c=>{if(conn&&conn.open){c.close();return}wireConnection(c)});
+      peer.on('error',e=>{
+        busy(false);
+        const msg=(e&&e.type==='unavailable-id')?'Room code collision — click Create room again.':(e&&e.message?e.message:'unknown room error');
+        say(msg);
+        try{peer.destroy()}catch(_){}
+        peer=null;
+      });
+    }catch(e){busy(false);say('Could not create room: '+e.message)}
+  }
+
+  function joinRoom(){
+    if(!window.Peer){say('Multiplayer service did not load. Refresh once.');return}
+    const wanted=roomInput.value.trim().toUpperCase();
+    if(wanted.length!==6){say('Enter the 6-character room code.');return}
+    busy(true);say('Joining '+wanted+'…');isHost=false;
+    try{
+      peer=new window.Peer();
+      peer.on('open',()=>{
+        const c=peer.connect('vh-'+wanted.toLowerCase(),{reliable:true});
+        wireConnection(c);
+      });
+      peer.on('error',e=>{busy(false);say('Join error: '+(e&&e.message?e.message:'check the room code'));try{peer.destroy()}catch(_){}peer=null});
+    }catch(e){busy(false);say('Could not join: '+e.message)}
+  }
+
+  create.addEventListener('click',createRoom);
+  join.addEventListener('click',joinRoom);
+  window.vhNetwork={
+    getConnection:()=>conn,
+    getRemote:()=>remote,
+    sendState:(d)=>{if(conn&&conn.open)try{conn.send(d)}catch(_){}},
+    isConnected:()=>!!(conn&&conn.open),
+    disconnect:()=>{try{peer&&peer.destroy()}catch(_){}}
+  };
+  window.vhGetLocalState=null;
+  window.addEventListener('beforeunload',()=>{try{peer&&peer.destroy()}catch(_){}});
+  say('Ready. Create or join a room.');
+})();
+</script>
 
 <script type="module">
 import * as THREE from 'three';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 
-const $=id=>document.getElementById(id),menu=$('menu'),statusEl=$('status'),roomEl=$('room'),playersEl=$('players'),createBtn=$('create'),joinBtn=$('join'),roomInput=$('roomInput');
-
+const $=id=>document.getElementById(id);
+const playersEl=$('players');
 const scene=new THREE.Scene();
 scene.background=new THREE.Color(0x8ba995);
 scene.fog=new THREE.FogExp2(0x91a996,.0037);
@@ -70,123 +175,80 @@ sun.castShadow=true;
 sun.shadow.mapSize.set(2048,2048);
 scene.add(sun);
 
-const loader=new GLTFLoader(),keys=new Set(),clock=new THREE.Clock(),camTarget=new THREE.Vector3();
-let characterTemplate=null,localPlayer=null,peer=null,conn=null;
+const loader=new GLTFLoader();
+const keys=new Set();
+const clock=new THREE.Clock();
+const camTarget=new THREE.Vector3();
+
+let characterTemplate=null, localPlayer=null;
 const remotePlayers=new Map();
 let orbitYaw=0,orbitPitch=.32,orbitDist=8.5,dragging=false,lastX=0,lastY=0,lastSend=0;
 
-function setStatus(msg){statusEl.textContent=msg}
-function setBusy(b){createBtn.disabled=b;joinBtn.disabled=b}
-
 async function loadAssets(){
-  const [env,char]=await Promise.all([
-    loader.loadAsync('./realistic_forest.glb'),
-    loader.loadAsync('./cyberpunk_character.glb')
-  ]);
-  const environment=env.scene;
-  const box=new THREE.Box3().setFromObject(environment);
-  environment.position.y-=box.min.y;
-  environment.traverse(o=>{if(o.isMesh)o.frustumCulled=true});
-  scene.add(environment);
-  characterTemplate=char.scene;
-  characterTemplate.traverse(o=>{if(o.isMesh){o.castShadow=true;o.frustumCulled=true}});
+  try{
+    const [env,char]=await Promise.all([
+      loader.loadAsync('./realistic_forest.glb'),
+      loader.loadAsync('./cyberpunk_character.glb')
+    ]);
+    const environment=env.scene;
+    const box=new THREE.Box3().setFromObject(environment);
+    environment.position.y-=box.min.y;
+    environment.traverse(o=>{if(o.isMesh)o.frustumCulled=true});
+    scene.add(environment);
+    characterTemplate=char.scene;
+    characterTemplate.traverse(o=>{if(o.isMesh){o.castShadow=true;o.frustumCulled=true}});
+    if(window.vhNetwork && window.vhNetwork.isConnected()) createLocal();
+  }catch(e){
+    console.error(e);
+    const s=document.getElementById('status');
+    if(s && !document.getElementById('menu').classList.contains('hidden')) s.textContent='Multiplayer ready; 3D assets are still loading/blocked.';
+  }
 }
 
-function makeCharacter(){
-  const c=characterTemplate.clone(true);
-  c.position.set(0,0,0);
-  return c;
-}
+function makeCharacter(){const c=characterTemplate.clone(true);c.position.set(0,0,0);return c}
 function createLocal(){
   if(!characterTemplate||localPlayer)return;
   localPlayer={mesh:makeCharacter(),pos:new THREE.Vector3(0,0,8),yaw:Math.PI,speed:4};
   localPlayer.mesh.position.copy(localPlayer.pos);
   scene.add(localPlayer.mesh);
+  window.vhGetLocalState=()=>({x:localPlayer.pos.x,z:localPlayer.pos.z,yaw:localPlayer.yaw});
 }
 function spawnRemote(){
-  if(remotePlayers.has('other'))return;
+  if(remotePlayers.has('other')||!characterTemplate)return;
   const mesh=makeCharacter();
   mesh.position.set(2,0,8);
   scene.add(mesh);
   remotePlayers.set('other',{mesh,targetPos:mesh.position.clone(),targetYaw:Math.PI});
-  playersEl.textContent='2 / 2';
 }
-function removeRemote(){
-  const r=remotePlayers.get('other');
-  if(r){scene.remove(r.mesh);remotePlayers.delete('other')}
-  playersEl.textContent='1 / 2';
-}
+function removeRemote(){const r=remotePlayers.get('other');if(r){scene.remove(r.mesh);remotePlayers.delete('other')}}
 
 renderer.domElement.addEventListener('pointerdown',e=>{dragging=true;lastX=e.clientX;lastY=e.clientY;renderer.domElement.setPointerCapture?.(e.pointerId)});
 renderer.domElement.addEventListener('pointerup',()=>dragging=false);
-renderer.domElement.addEventListener('pointermove',e=>{if(!dragging)return;orbitYaw-=(e.clientX-lastX)*.006;orbitPitch-=(e.clientY-lastY)*.004;orbitPitch=Math.max(-.05,Math.min(.95,orbitPitch));lastX=e.clientX;lastY=e.clientY});
+renderer.domElement.addEventListener('pointermove',e=>{
+  if(!dragging)return;
+  orbitYaw-=(e.clientX-lastX)*.006;
+  orbitPitch-=(e.clientY-lastY)*.004;
+  orbitPitch=Math.max(-.05,Math.min(.95,orbitPitch));
+  lastX=e.clientX;lastY=e.clientY;
+});
 renderer.domElement.addEventListener('wheel',e=>{orbitDist=Math.max(4,Math.min(14,orbitDist+e.deltaY*.01))},{passive:true});
 addEventListener('keydown',e=>keys.add(e.key.toLowerCase()));
 addEventListener('keyup',e=>keys.delete(e.key.toLowerCase()));
 
 function updateMovement(dt){
   if(!localPlayer)return;
-  let x=0,z=0;if(keys.has('w'))z--;if(keys.has('s'))z++;if(keys.has('a'))x--;if(keys.has('d'))x++;
+  let x=0,z=0;
+  if(keys.has('w'))z--;if(keys.has('s'))z++;if(keys.has('a'))x--;if(keys.has('d'))x++;
   const len=Math.hypot(x,z);if(!len)return;
-  x/=len;z/=len;const c=Math.cos(orbitYaw),s=Math.sin(orbitYaw),dx=x*c-z*s,dz=x*s+z*c;
+  x/=len;z/=len;
+  const c=Math.cos(orbitYaw),s=Math.sin(orbitYaw);
+  const dx=x*c-z*s,dz=x*s+z*c;
   localPlayer.pos.x=THREE.MathUtils.clamp(localPlayer.pos.x+dx*localPlayer.speed*dt,-52,30);
   localPlayer.pos.z=THREE.MathUtils.clamp(localPlayer.pos.z+dz*localPlayer.speed*dt,-46,48);
   localPlayer.yaw=Math.atan2(dx,dz);
   localPlayer.mesh.position.copy(localPlayer.pos);
   localPlayer.mesh.rotation.y=localPlayer.yaw;
 }
-function sendState(now){
-  if(!conn||!conn.open||!localPlayer||now-lastSend<50)return;
-  lastSend=now;
-  try{conn.send({type:'state',x:localPlayer.pos.x,z:localPlayer.pos.z,yaw:localPlayer.yaw})}catch{}
-}
-function wireConn(c){
-  conn=c;
-  conn.on('open',()=>{
-    setBusy(false);
-    setStatus('Connected. Roam together.');
-    menu.classList.add('hidden');
-    if(!localPlayer)createLocal();
-    conn.send({type:'hello',x:localPlayer.pos.x,z:localPlayer.pos.z,yaw:localPlayer.yaw});
-  });
-  conn.on('data',d=>{
-    if(d?.type==='hello'||d?.type==='state'){
-      spawnRemote();
-      const r=remotePlayers.get('other');
-      if(r){r.targetPos.set(d.x,0,d.z);r.targetYaw=d.yaw}
-    }
-  });
-  conn.on('close',()=>{removeRemote();setStatus('Other player disconnected.')});
-  conn.on('error',e=>{setBusy(false);setStatus('Connection error: '+(e?.message||'try again'))});
-}
-function randomCode(){const chars='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';let s='';for(let i=0;i<6;i++)s+=chars[Math.floor(Math.random()*chars.length)];return s}
-
-createBtn.addEventListener('click',()=>{
-  if(!window.Peer){setStatus('Multiplayer service failed to load. Refresh once and try again.');return}
-  if(peer&&!peer.destroyed)return;
-  const code=randomCode();
-  setBusy(true);setStatus('Creating room…');
-  peer=new window.Peer('vh-'+code.toLowerCase(),{host:'0.peerjs.com',port:443,path:'/',secure:true});
-  peer.on('open',()=>{
-    roomEl.textContent='ROOM '+code;
-    setStatus('Room ready. Share code '+code);
-    menu.classList.add('hidden');
-    if(!localPlayer)createLocal();
-  });
-  peer.on('connection',c=>{if(conn&&conn.open){c.close();return}wireConn(c)});
-  peer.on('error',e=>{setBusy(false);setStatus('Room error: '+(e?.message||'try a different code'));try{peer.destroy()}catch{}});
-});
-joinBtn.addEventListener('click',()=>{
-  if(!window.Peer){setStatus('Multiplayer service failed to load. Refresh once and try again.');return}
-  const code=roomInput.value.trim().toUpperCase();
-  if(!code){setStatus('Enter the 6-character room code.');return}
-  setBusy(true);setStatus('Joining '+code+'…');
-  peer=new window.Peer(undefined,{host:'0.peerjs.com',port:443,path:'/',secure:true});
-  peer.on('open',()=>wireConn(peer.connect('vh-'+code.toLowerCase(),{reliable:true})));
-  peer.on('error',e=>{setBusy(false);setStatus('Join error: '+(e?.message||'check the room code'));try{peer.destroy()}catch{}});
-});
-addEventListener('beforeunload',()=>{try{conn?.send({type:'bye'})}catch{}try{peer?.destroy()}catch{}});
-
 function updateCamera(dt){
   if(!localPlayer)return;
   camTarget.lerp(localPlayer.pos,Math.min(1,dt*10));
@@ -195,19 +257,33 @@ function updateCamera(dt){
   camera.position.y=camTarget.y+1.8+Math.sin(orbitPitch)*orbitDist;
   camera.lookAt(camTarget.x,camTarget.y+1.25,camTarget.z);
 }
+window.addEventListener('vh:connected',()=>{createLocal();if(window.vhNetwork.getConnection())window.vhNetwork.getConnection().send({type:'hello',x:localPlayer.pos.x,z:localPlayer.pos.z,yaw:localPlayer.yaw})});
+window.addEventListener('vh:remote',e=>{
+  const d=e.detail||{};spawnRemote();
+  const r=remotePlayers.get('other');if(r){r.targetPos.set(d.x,0,d.z);r.targetYaw=d.yaw}
+  playersEl.textContent='2 / 2';
+});
+window.addEventListener('vh:disconnected',()=>{removeRemote();playersEl.textContent='1 / 2'});
+window.addEventListener('vh:hostready',()=>{if(characterTemplate)createLocal()});
+
 function animate(){
   requestAnimationFrame(animate);
   const dt=Math.min(clock.getDelta(),.05),now=performance.now();
-  if(localPlayer){updateMovement(dt);updateCamera(dt);sendState(now)}
-  for(const r of remotePlayers.values()){r.mesh.position.lerp(r.targetPos,Math.min(1,dt*12));r.mesh.rotation.y=THREE.MathUtils.lerp(r.mesh.rotation.y,r.targetYaw,Math.min(1,dt*12))}
+  if(localPlayer){
+    updateMovement(dt);updateCamera(dt);
+    if(window.vhNetwork&&window.vhNetwork.isConnected()&&now-lastSend>50){
+      lastSend=now;
+      window.vhNetwork.sendState({type:'state',x:localPlayer.pos.x,z:localPlayer.pos.z,yaw:localPlayer.yaw});
+    }
+  }
+  for(const r of remotePlayers.values()){
+    r.mesh.position.lerp(r.targetPos,Math.min(1,dt*12));
+    r.mesh.rotation.y=THREE.MathUtils.lerp(r.mesh.rotation.y,r.targetYaw,Math.min(1,dt*12));
+  }
   renderer.render(scene,camera);
 }
 addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
-
-(async()=>{
-  try{await loadAssets();setStatus('Ready. Create or join a room.')}
-  catch(e){console.error(e);setStatus('3D assets failed to load: '+e.message)}
-})();
+loadAssets();
 animate();
 </script>
 </body>
